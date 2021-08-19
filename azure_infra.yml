@@ -4,7 +4,7 @@
   gather_facts: no
   vars: 
     location: eastus
-    rg_name: iac-lod18600524
+    rg_name: iac-lod18636166
     debug: True
     vms:
       azvote_vms:
@@ -24,7 +24,7 @@
 
   - name: Set identifier
     set_fact:
-      identifier: 18600524
+      identifier: 18636166
 
   - name: Create the Azure Vnet
     azure_rm_virtualnetwork:
