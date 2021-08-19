@@ -60,16 +60,17 @@
       rules:
         - name: allow_ssh
           protocol: Tcp
-          destination_port_allow_range: 22
+          destination_port_range: 22
           access: Allow
           priority: 500
           direction: Inbound
         - name: allow_http
           protocol: Tcp
-          destination_port_allow_range: 80
+          destination_port_range: 80
           access: Allow
           priority: 400
           direction: Inbound
+    register: nsg
 
   - name: Create AZ Vote NICs
     azure_rm_networkinterface:
@@ -79,10 +80,10 @@
       virtual_network: "{{ vnet.state.name }}"
       security_group: "{{ nsg.state.name }}"
       ip_configurations:
-        - name: primary
-          primary: yes
-          public_ip_address_name: "{{ item.value.pip }}"
-    with_dict: "{{ vms.azvote.vms }}"
+      - name: primary
+        primary: yes
+        public_ip_address_name: "{{ item.value.pip }}"
+    with_dict: "{{ vms.azvote_vms }}"
     register: azvote_nics
 
   - name: Create Availability Set
@@ -99,7 +100,7 @@
       resource_group: "{{ rg.state.name }}"
       name: "{{ item.key }}"
       state: present
-      azure_rm_availabilityset: "{{ avset.state.name }}"
+      availability_set: "{{ avset.state.name }}"
       network_interface_names:
       - "{{ item.value.nic }}"
       admin_username: azure
@@ -127,7 +128,8 @@
       name: azvote-cache-{{ identifier }}
       enable_non_ssl_port: yes
       location: "{{ rg.state.location }}"
+      resource_group: "{{ rg.state.name }}"
       sku:
         name: basic
         size: C0
-        state: present
+      state: present
