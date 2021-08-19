@@ -1,0 +1,133 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: no
+  vars: 
+    location: eastus
+    rg_name: iac-lod18600524
+    debug: True
+    vms:
+      azvote_vms:
+        azvote1:
+          nic: azvote1-nic
+          avset: azvote-avset
+          pip: azvote1-pip
+
+  tasks:
+
+  - name: Create workshop resource group
+    azure_rm_resourcegroup:
+      name: "{{ rg_name }}"
+      location: "{{ location }}"
+      state: present
+    register: rg
+
+  - name: Set identifier
+    set_fact:
+      identifier: 18600524
+
+  - name: Create the Azure Vnet
+    azure_rm_virtualnetwork:
+      name: "{{ rg.state.name }}--vnet"
+      state: present
+      resource_group: "{{ rg.state.name }}"
+      address_prefixes_cidr:
+      - 10.13.0.0/16
+    register: vnet
+
+  - name: Create AZ Vote Subnet
+    azure_rm_subnet:
+      name: azvote-subnet
+      resource_group: "{{ rg.state.name }}"
+      virtual_network_name: "{{ vnet.state.name }}"
+      address_prefix_cidr: 10.13.1.0/24
+    register: azvote_subnet
+
+  - name: Create Public IP for AZ Vote Web Front End
+    with_dict: "{{ vms.azvote_vms }}"
+    azure_rm_publicipaddress:
+      name: "{{ item.value.pip }}"
+      resource_group: "{{ rg.state.name }}"
+      domain_name: "{{ item.key }}-{{ identifier }}"
+      state: present
+      allocation_method: Dynamic
+    register: azvote_pips
+
+  - name: Create Network Security Group
+    azure_rm_securitygroup:
+      resource_group: "{{ rg.state.name }}"
+      name: azvote-nsg
+      rules:
+        - name: allow_ssh
+          protocol: Tcp
+          destination_port_allow_range: 22
+          access: Allow
+          priority: 500
+          direction: Inbound
+        - name: allow_http
+          protocol: Tcp
+          destination_port_allow_range: 80
+          access: Allow
+          priority: 400
+          direction: Inbound
+
+  - name: Create AZ Vote NICs
+    azure_rm_networkinterface:
+      resource_group: "{{ rg.state.name }}"
+      name: "{{ item.value.nic }}"
+      subnet_name: "{{ azvote_subnet.state.name }}"
+      virtual_network: "{{ vnet.state.name }}"
+      security_group: "{{ nsg.state.name }}"
+      ip_configurations:
+        - name: primary
+          primary: yes
+          public_ip_address_name: "{{ item.value.pip }}"
+    with_dict: "{{ vms.azvote.vms }}"
+    register: azvote_nics
+
+  - name: Create Availability Set
+    azure_rm_availabilityset:
+      name: azvote-avset
+      resource_group: "{{ rg.state.name }}"
+      sku: Aligned
+      platform_fault_domain_count: 2
+    register: avset
+
+  - name: Create AZ Vote VMs
+    with_dict: "{{ vms.azvote_vms }}"
+    azure_rm_virtualmachine:
+      resource_group: "{{ rg.state.name }}"
+      name: "{{ item.key }}"
+      state: present
+      azure_rm_availabilityset: "{{ avset.state.name }}"
+      network_interface_names:
+      - "{{ item.value.nic }}"
+      admin_username: azure
+      admin_password: P@$$word123
+      vm_size: Standard_DS2_v2
+      managed_disk_type: Standard_LRS
+      image:
+        publisher: Canonical
+        offer: UbuntuServer
+        sku: 18.04-LTS
+        version: latest
+      tags:
+        voting-app-tier: web
+
+  - name: Create Diag Storage Account
+    azure_rm_storageaccount:
+      resource_group: "{{ rg.state.name }}"
+      name: "redisdiag{{ identifier }}"
+      state: present
+      type: Standard_LRS
+    register: diagstorage
+
+  - name: deploy redis cache
+    azure_rm_rediscache:
+      name: azvote-cache-{{ identifier }}
+      enable_non_ssl_port: yes
+      location: "{{ rg.state.location }}"
+      sku:
+        name: basic
+        size: C0
+        state: present
